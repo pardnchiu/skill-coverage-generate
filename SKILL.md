@@ -3,6 +3,24 @@
 ## 目的
 分析 Go 專案的測試覆蓋率,並自動生成/更新測試檔案以達到 ≥90% 的覆蓋率門檻。
 
+## 呼叫語法
+
+```
+/coverage-generate [target]
+```
+
+| 參數       | 說明                                      | 範例                     |
+|------------|-------------------------------------------|--------------------------|
+| `target`   | 可選。指定套件路徑（支援 `./...` glob）。 | `./internal/service/...` |
+|            | 省略時預設為 `./...`（全模組）            |                          |
+
+**呼叫範例**：
+```
+/coverage-generate                          # 全模組
+/coverage-generate ./internal/service/...   # 指定 package 群
+/coverage-generate ./pkg/utils              # 單一 package
+```
+
 ## 工作流程概覽
 
 ```
@@ -21,11 +39,16 @@
 # 導航至 Go 模組根目錄(go.mod 所在位置)
 cd /path/to/module
 
+# 解析 target 參數（預設 ./...）
+TARGET=${1:-"./..."}
+# 轉換為目錄路徑（去掉尾端的 /... 或 ...）
+TARGET_DIR=$(echo "$TARGET" | sed 's|/\.\.\.$||; s|^\.\.\.$|.|')
+
 # 列出所有 Go 原始檔案(排除測試、vendor、生成的檔案)
-find . -name "*.go" \
+find "$TARGET_DIR" -name "*.go" \
   ! -name "*_test.go" \
-  ! -path "./vendor/*" \
-  ! -path "./.git/*" \
+  ! -path "*/vendor/*" \
+  ! -path "*/.git/*" \
   ! -name "*.pb.go" \
   ! -name "*_generated.go" \
   -type f
@@ -46,11 +69,11 @@ find . -name "*.go" \
 
 ### 步驟 2.1:生成覆蓋率分析檔
 ```bash
-# 執行測試並產生覆蓋率(包含所有套件)
-go test -coverprofile=coverage.out -covermode=atomic ./...
+# 執行測試並產生覆蓋率（以 TARGET 取代 ./...）
+go test -coverprofile=coverage.out -covermode=atomic "$TARGET"
 
 # 如果特定套件失敗,繼續執行其他套件
-go test -coverprofile=coverage.out -covermode=atomic ./... 2>&1 || true
+go test -coverprofile=coverage.out -covermode=atomic "$TARGET" 2>&1 || true
 ```
 
 ### 步驟 2.2:解析覆蓋率報告
@@ -252,10 +275,10 @@ EOF
 go build ./...
 
 # 2. 執行新測試
-go test -v ./...
+go test -v "$TARGET"
 
 # 3. 重新生成覆蓋率報告
-go test -coverprofile=coverage_new.out ./...
+go test -coverprofile=coverage_new.out "$TARGET"
 go tool cover -func=coverage_new.out | grep "total:"
 
 # 4. 比較改進情況
@@ -275,14 +298,18 @@ echo "Current:  $(grep total coverage_new.out)"
 
 ### 完整工作流程執行
 ```bash
+# 解析 target 參數（預設 ./...）
+TARGET=${1:-"./..."}
+TARGET_DIR=$(echo "$TARGET" | sed 's|/\.\.\.$||; s|^\.\.\.$|.|')
+
 # 1. 探索
 echo "=== Phase 1: Discovery ==="
-GO_FILES=$(find . -name "*.go" ! -name "*_test.go" ! -path "./vendor/*" -type f)
+GO_FILES=$(find "$TARGET_DIR" -name "*.go" ! -name "*_test.go" ! -path "*/vendor/*" -type f)
 echo "$GO_FILES"
 
 # 2. 覆蓋率分析
 echo "=== Phase 2: Coverage Analysis ==="
-go test -coverprofile=coverage.out ./... 2>&1 || true
+go test -coverprofile=coverage.out "$TARGET" 2>&1 || true
 go tool cover -func=coverage.out
 
 # 3. 識別目標(< 90%)
@@ -300,6 +327,14 @@ done
 ---
 
 ## 邊界情況與考量事項
+
+### Target 參數邊界情況
+
+| 情況 | 處理方式 |
+|------|----------|
+| 路徑不存在 | `find` 回傳空結果，提示使用者確認路徑 |
+| 單一 package（無 `/...`） | 直接作為 `go test ./pkg/name` 執行 |
+| 傳入 `./...` 或省略 | 等同現有全模組行為 |
 
 ### 需要跳過的檔案
 - `package main` 中的 `main.go`(整合測試範疇)
